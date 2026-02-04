@@ -1,8 +1,11 @@
-import { Component, AfterViewChecked, ElementRef, ViewChild } from '@angular/core';
+import { Component, AfterViewChecked, ElementRef, ViewChild, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { ThemeService } from '../../core/services/theme.service';
+import { ChatService } from './chat.service';
+import { Subscription } from 'rxjs';
+import { MarkdownPipe } from './markdown.pipe';
 
 type Message = {
   id: string;
@@ -10,6 +13,7 @@ type Message = {
   images?: { url: string; name: string }[];
   timestamp: number;
   fromMe: boolean;
+  isTyping?: boolean;
 };
 
 @Component({
@@ -17,9 +21,9 @@ type Message = {
   templateUrl: './chat.component.html',
   styleUrls: ['./chat.component.scss'],
   standalone: true,
-  imports: [CommonModule, FormsModule, ButtonModule],
+  imports: [CommonModule, FormsModule, ButtonModule, MarkdownPipe],
 })
-export class ChatComponent implements AfterViewChecked {
+export class ChatComponent implements AfterViewChecked, OnDestroy {
   @ViewChild('historyEnd') private historyEnd!: ElementRef;
 
   history: Message[] = [];
@@ -27,7 +31,10 @@ export class ChatComponent implements AfterViewChecked {
   selectedFiles: File[] = [];
   previews: { url: string; name: string }[] = [];
 
-  constructor(private themeService: ThemeService) {}
+  private streamSub?: Subscription;
+  private typingMessageId?: string;
+
+  constructor(private themeService: ThemeService, private chatService: ChatService) {}
 
   // retorna o ícone atual para o botão de alternar tema
   get themeIcon(): string {
@@ -76,11 +83,76 @@ export class ChatComponent implements AfterViewChecked {
     };
 
     this.history.push(msg);
+    // capture prompt to send to stream
+    const prompt = msg.text ?? '';
 
     // reset input
     this.messageText = '';
     this.selectedFiles = [];
     this.previews = [];
+
+    // stop any existing stream
+    this.stopStream();
+
+    // add a typing placeholder (assistant) while waiting for the stream
+    const typingMsg: Message = {
+      id: 'typing-' + Date.now().toString(36),
+      timestamp: Date.now(),
+      fromMe: false,
+      isTyping: true,
+    };
+
+    this.typingMessageId = typingMsg.id;
+    this.history.push(typingMsg);
+    this.scrollToBottom();
+
+    // connect to SSE and append chunks to the typing message
+    this.streamSub = this.chatService.connectToStream(prompt).subscribe({
+      next: (chunk: string) => {
+        const idx = this.history.findIndex((m) => m.id === this.typingMessageId);
+        if (idx === -1) {
+          // if placeholder missing, push a new assistant message
+          this.history.push({
+            id: 'assistant-' + Date.now().toString(36),
+            text: chunk,
+            timestamp: Date.now(),
+            fromMe: false,
+          });
+        } else {
+          const m = this.history[idx];
+          if (!m.text) m.text = '';
+          m.text += chunk;
+          m.timestamp = Date.now();
+        }
+        this.scrollToBottom();
+      },
+      error: (err) => {
+        const idx = this.history.findIndex((m) => m.id === this.typingMessageId);
+        if (idx !== -1) {
+          this.history[idx].text = '[erro no stream]';
+          this.history[idx].isTyping = false;
+          this.history[idx].timestamp = Date.now();
+        }
+        this.stopStream();
+      },
+      complete: () => {
+        const idx = this.history.findIndex((m) => m.id === this.typingMessageId);
+        if (idx !== -1) {
+          this.history[idx].isTyping = false;
+          this.history[idx].timestamp = Date.now();
+        }
+        this.stopStream();
+      },
+    });
+  }
+
+  private stopStream() {
+    if (this.streamSub) {
+      this.streamSub.unsubscribe();
+      this.streamSub = undefined;
+    }
+    this.typingMessageId = undefined;
+    this.chatService.closeStream();
   }
 
   // simple auto-scroll to bottom
@@ -94,5 +166,15 @@ export class ChatComponent implements AfterViewChecked {
     } catch (e) {
       // ignore
     }
+  }
+
+  ngOnDestroy(): void {
+    this.stopStream();
+    // revoke any created object URLs for previews
+    this.previews.forEach((p) => {
+      try {
+        URL.revokeObjectURL(p.url);
+      } catch {}
+    });
   }
 }

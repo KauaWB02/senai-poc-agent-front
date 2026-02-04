@@ -24,10 +24,10 @@
   <main class="flex-1 flex justify-center p-6">
     <!-- CHAT CARD -->
     <section
-      class="w-full max-w-4xl flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm"
+      class="w-full max-w-4xl flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm max-h-[80vh]"
     >
       <!-- HISTORY -->
-      <div class="flex-1 overflow-y-auto px-8 py-6 space-y-5">
+      <div class="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
         <ng-container *ngFor="let m of history">
           <div class="flex" [ngClass]="m.fromMe ? 'justify-end' : 'justify-start'">
             <!-- BUBBLE -->
@@ -41,7 +41,14 @@
             >
               <!-- TEXT -->
               <div *ngIf="m.text" class="whitespace-pre-wrap">
-                {{ m.text }}
+                <div [innerHTML]="m.text | markdown"></div>
+              </div>
+
+              <!-- TYPING INDICATOR -->
+              <div *ngIf="m.isTyping" class="mt-1">
+                <div class="typing-dots">
+                  <span></span><span></span><span></span>
+                </div>
               </div>
 
               <!-- IMAGES -->
@@ -99,15 +106,15 @@
             </label>
 
             <!-- SEND -->
-            <button
-              pButton
-              type="button"
-              class="p-button-rounded p-button-primary"
-              (click)="sendMessage()"
-              aria-label="Enviar mensagem"
-            >
-              <span class="pi pi-send"></span>
-            </button>
+              <button
+                pButton
+                type="button"
+                class="p-button-rounded p-button-primary"
+                (click)="sendMessage()"
+                aria-label="Enviar mensagem"
+              >
+                <span class="pi pi-send"></span>
+              </button>
           </div>
         </div>
 
